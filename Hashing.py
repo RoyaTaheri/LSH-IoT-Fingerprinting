@@ -3,12 +3,19 @@ import scapy.all as scapy
 from nilsimsa import Nilsimsa
 from scapy.all import rdpcap, raw
 import pandas as pd
+from sklearn.model_selection import KFold
+
 
 
 def anonymize_ip(packet):
     if scapy.IP in packet:
         packet[scapy.IP].src = "1.1.1.1"
         packet[scapy.IP].dst = "1.1.1.1"
+
+    if packet.haslayer('Ether'):
+        packet['Ether'].src = "00:11:22:33:44:55"
+        packet['Ether'].dst = "00:11:22:33:44:55"
+
     return packet
 
 
@@ -18,18 +25,13 @@ def extract_headers_payloads(pcap_file):
     payloads = []
 
     for packet in packets:
-
-        num_packets = len(packets)
         raw_packet = bytes(packet)
         concatenated_full_packets = b''
         concatenated_full_packets += raw_packet
 
-
         if packet.haslayer('Raw'):
             payload = bytes(packet['Raw'])
-            #print("P:", payload)
             header = raw_packet[:-len(payload)]
-            #print("H:", header)
         else:
             payload = b''
             header = raw_packet
@@ -37,32 +39,10 @@ def extract_headers_payloads(pcap_file):
         headers.append(header)
         payloads.append(payload)
 
-        # Concatenate all headers and all payloads
     all_headers = b''.join(headers)
-    print(all_headers)
     all_payloads = b''.join(payloads)
 
     return concatenated_full_packets, all_headers, all_payloads
-    # for packet in packets:
-    #     anonymized_packet = anonymize_ip(packet)
-    #     raw_packet = bytes(anonymized_packet)
-    #     print(raw_packet)
-    #
-    #     first_layer = anonymized_packet.firstlayer()
-    #     underlayer = first_layer.underlayer
-    #
-    #     if underlayer:
-    #         header = raw_packet[:underlayer._dport]
-    #         payload = raw_packet[underlayer._dport:]
-    #         print(payload)
-    #         headers.append(header)
-    #         payloads.append(payload)
-    #     else:
-    #         # Handle the case where underlayer is None
-    #         headers.append(raw_packet)
-    #         payloads.append(b'')
-    #
-    # return b''.join(headers), b''.join(payloads)
 
 
 def hash_with_nilsimsa(data):
@@ -71,15 +51,14 @@ def hash_with_nilsimsa(data):
 
 
 def process_pcap_folder(folder_path):
-
     results = []
-    m=0
+    m = 0
 
     folder_name = os.path.basename(os.path.normpath(folder_path))
 
     for file_name in os.listdir(folder_path):
         if file_name.endswith(".pcap"):
-            m+=1
+            m += 1
 
     for file_name in os.listdir(folder_path):
         if file_name.endswith(".pcap"):
@@ -95,22 +74,36 @@ def process_pcap_folder(folder_path):
             print(f"Payloads Hash: {payloads_hash}")
             print()
 
-
-
-        results.append({
-            'device_name': folder_name,
-            'measurement': m,
-            'full_packet_hash': full_hash,
-            'header_hash': headers_hash,
-            'payload_hash': payloads_hash
-        })
+            results.append({
+                'device_name': folder_name,
+                'measurement': m,
+                'full_packet_hash': full_hash,
+                'header_hash': headers_hash,
+                'payload_hash': payloads_hash
+            })
 
     return results
 
 
+def process_multiple_folders(folders_list):
+    all_results = []
+
+    for folder_path in folders_list:
+        results = process_pcap_folder(folder_path)
+        all_results.extend(results)
+
+    return all_results
+
+
+kf = KFold(n_splits=5, shuffle=True, random_state=1)
+
+
 if __name__ == "__main__":
-    folder_path = "Aria"  # Path to the folder containing PCAP files
-    results = process_pcap_folder(folder_path)
+    folders_list = ["Aria", "D-LinkCam", "D-LinkDayCam", "D-LinkDoorSensor", "D-LinkHomeHub", "D-LinkSensor", "D-LinkSiren",
+                    "D-LinkSwitch", "D-LinkWaterSensor", "EdimaxPlug1101W", "EdimaxPlug2101W", "EdnetCam1", "EdnetCam2", "EdnetGateway",
+                    "HomeMaticPlug", "HueBridge", "HueSwitch", "iKettle2", "Lightify", "MAXGateway", "SmarterCoffee", "TP-LinkPlugHS100",
+                    "TP-LinkPlugHS110", "WeMoInsightSwitch", "WeMoLink", "WeMoSwitch", "Withings"]  # List your folders here
+    results = process_multiple_folders(folders_list)
 
     df = pd.DataFrame(results)
     df.to_csv('pcap_analysis.csv', index=False)
